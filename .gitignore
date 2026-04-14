@@ -1,0 +1,31 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Archivos compilados en Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Ficheros de log y configuración local
+*.log
+.env
+.streamlit/secrets.toml
+
+# Datos pesados crudos (Raw Data)
+# Nota: Puedes decidir si subir el archivo procesado final (data/processed/negocios_scored.csv) 
+# para que la app funcione de inmediato, pero ignoraremos los datasets de 30MB en bruto.
+data/*.csv
+data/*.xlsx
+data/*.tsv
+data/*.json
+!data/processed/negocios_scored.csv
+
+# SO
+.DS_Store
+Thumbs.db
