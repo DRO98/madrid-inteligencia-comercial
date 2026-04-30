@@ -33,8 +33,8 @@ with st.sidebar.form('filtros_analisis'):
 
     st.markdown('---')
     st.subheader('¡NUEVO! Datos Empíricos')
-    importancia_turismo = st.slider('Influencia del Turismo (Airbnbs)', 0.0, 100.0, 50.0, help='Priorizar zonas con alta carga de viviendas de uso turístico.')
     importancia_transito = st.slider('Importancia del Flujo Peatonal', 0.0, 100.0, 50.0, help='Priorizar barrios con el mayor aforo peatonal validado en sensores.')
+    tolerancia_supervivencia = st.slider('Tolerancia Supervivencia Comercial', 0.0, 100.0, 50.0, help='Sube este valor para priorizar barrios donde los negocios sobreviven más.')
 
     submitted = st.form_submit_button('Ejecutar Análisis Espacial ')
 
@@ -49,8 +49,8 @@ if submitted:
         horario_objetivo=horario_objetivo,
         metros_cuadrados=metros_cuadrados,
         presupuesto_max=presupuesto_max,
-        importancia_turismo=importancia_turismo,
-        importancia_transito=importancia_transito
+        importancia_transito=importancia_transito,
+        tolerancia_supervivencia=tolerancia_supervivencia
     )
 
 import folium

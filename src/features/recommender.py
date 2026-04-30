@@ -13,8 +13,17 @@ def generar_ranking_barrios(
     metros_cuadrados: int = 100, 
     presupuesto_max: float = 3000.0,
     importancia_turismo: float = 50.0,
-    importancia_transito: float = 50.0
+    importancia_transito: float = 50.0,
+    tolerancia_supervivencia: float = 50.0
 ) -> pd.DataFrame:
+    def _safe_norm(series: pd.Series) -> pd.Series:
+        s = series.fillna(0.0).astype(float)
+        max_v = s.max()
+        min_v = s.min()
+        if max_v <= min_v:
+            return pd.Series(np.ones(len(s)), index=s.index)
+        return (s - min_v) / (max_v - min_v)
+
     aggs = {
         'id_local': 'count',          
         'es_nocturno': 'mean',
@@ -27,6 +36,9 @@ def generar_ranking_barrios(
         'renta_neta_hogares': 'first', 
         'score_turismo': 'first',
         'score_transito': 'first',
+        'peatones': 'mean',
+        'UNIDADES_VUT': 'mean',
+        'poblacion_total': 'first',
         'precio_m2_real': 'first',
         'porcentaje_mujeres_real': 'first',
         'pension_media_real': 'first',
@@ -57,6 +69,7 @@ def generar_ranking_barrios(
     
     # Pensión Media (Para segmento Jubilado)
     ranking['pension_media'] = ranking['pension_media_real']
+    ranking['score_competencia'] = np.log1p(ranking['competencia_directa'])
 
     # --- FILTRO EXCLUYENTE PRECIO ---
     ranking = ranking[ranking['coste_alquiler_estimado'] <= presupuesto_max]
@@ -67,7 +80,7 @@ def generar_ranking_barrios(
     # --- CÁLCULO BASE INVERSORA ---
     score_base = (ranking['locales_totales'] / ranking['locales_totales'].max()) * 50
     comp_ajustada = np.log1p(ranking['competencia_directa']) + 1 
-    
+
     bonus_terr = (ranking['capacidad_exterior'] / (ranking['capacidad_exterior'].max() + 0.1)) * peso_terraza * 5
     bonus_eco = (ranking['terraza_acondicionada'] / (ranking['terraza_acondicionada'].max() + 0.1)) * peso_eco * 5
     
@@ -110,7 +123,35 @@ def generar_ranking_barrios(
     bonus_turismo = 1.0 + (ranking['score_turismo'].fillna(0) / 100.0) * (importancia_turismo / 50.0)
     bonus_transito = 1.0 + (ranking['score_transito'].fillna(0) / 100.0) * (importancia_transito / 50.0)
 
-    ranking['score_inversion'] = ((score_base + bonus_terr + bonus_eco) / comp_ajustada) * bonus_edad * bonus_genero * bonus_renta * bonus_horario * bonus_turismo * bonus_transito
+    # Componente multiplicativa original (afinidad de mercado)
+    score_multiplicativo = ((score_base + bonus_terr + bonus_eco) / comp_ajustada) * bonus_edad * bonus_genero * bonus_renta * bonus_horario * bonus_turismo * bonus_transito
+
+    # Componente aditiva robusta (evita que un único factor domine por multiplicación)
+    w_transito = np.clip(importancia_transito / 100.0, 0.0, 1.0)
+    w_supervivencia = np.clip(tolerancia_supervivencia / 100.0, 0.0, 1.0)
+
+    n_transito = _safe_norm(ranking['score_transito'])
+    n_turismo = _safe_norm(ranking['score_turismo'])
+    n_supervivencia = _safe_norm(ranking['tasa_supervivencia'])
+    n_poblacion = _safe_norm(ranking['poblacion_total'])
+    n_vut = _safe_norm(ranking['UNIDADES_VUT'])
+    n_peatones = _safe_norm(ranking['peatones'])
+    n_competencia = _safe_norm(ranking['score_competencia'])
+
+    score_demanda = (0.35 * n_transito) + (0.25 * n_peatones) + (0.20 * n_poblacion) + (0.20 * n_turismo)
+    score_atractor = (0.5 * n_turismo) + (0.5 * n_vut)
+    score_riesgo = (0.65 * n_supervivencia) + (0.35 * (1.0 - n_competencia))
+
+    score_robusto = (
+        0.35 * score_demanda
+        + 0.15 * score_atractor
+        + 0.25 * w_transito * n_transito
+        + 0.25 * w_supervivencia * n_supervivencia
+        + 0.15 * (1.0 - n_competencia)
+    )
+
+    # Blend final: se mantiene la lógica original y se suma una capa robusta orientada a decisión
+    ranking['score_inversion'] = (0.55 * _safe_norm(score_multiplicativo)) + (0.45 * score_robusto)
     
     max_val = ranking['score_inversion'].max()
     if max_val > 0:
@@ -118,6 +159,6 @@ def generar_ranking_barrios(
 
     ranking = ranking.sort_values(by='score_inversion', ascending=False)
     
-    columnas_return = ['desc_barrio_local', 'score_inversion', 'competencia_directa', 'renta_neta_hogares', 'locales_totales', 'precio_m2_alquiler', 'coste_alquiler_estimado', 'tasa_supervivencia', 'porcentaje_mujeres', 'pension_media', 'score_turismo', 'score_transito']
+    columnas_return = ['desc_barrio_local', 'score_inversion', 'competencia_directa', 'renta_neta_hogares', 'locales_totales', 'precio_m2_alquiler', 'coste_alquiler_estimado', 'tasa_supervivencia', 'porcentaje_mujeres', 'pension_media', 'score_turismo', 'score_transito', 'peatones', 'UNIDADES_VUT', 'poblacion_total']
     salida = ranking[columnas_return].copy()
     return salida.head(5)
