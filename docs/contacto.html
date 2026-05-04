@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Contacto · Madrid económico</title>
+    <link rel="stylesheet" href="./static/app.css" />
+  </head>
+  <body class="site-layout page-static page-contact">
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Principal">
+        <a class="site-brand" href="./index.html" aria-label="MadridLocal, inicio">
+          <img src="./static/madridlocal.png" alt="" class="site-brand-logo" decoding="async" />
+        </a>
+        <div class="site-nav-links">
+          <a href="./explorar.html">Explorar</a>
+          <a href="./nosotros.html">Quiénes somos</a>
+          <a href="./contacto.html" aria-current="page">Contacto</a>
+        </div>
+      </nav>
+    </header>
+
+    <main class="site-main prose">
+      <h1>Contacto</h1>
+      <p class="contact-intro">
+        Si quieres proponer mejoras, reportar un fallo o colaborar con datos o código, puedes abrir un issue o pull
+        request en GitHub o enviarnos un mensaje con el formulario siguiente (se abrirá tu cliente de correo).
+      </p>
+
+      <form class="contact-form" id="contact-form" novalidate>
+        <label for="c-name">Nombre</label>
+        <input id="c-name" name="name" type="text" autocomplete="name" required />
+
+        <label for="c-email">Correo</label>
+        <input id="c-email" name="email" type="email" autocomplete="email" required />
+
+        <label for="c-subject">Asunto</label>
+        <input id="c-subject" name="subject" type="text" required />
+
+        <label for="c-body">Mensaje</label>
+        <textarea id="c-body" name="body" rows="6" required></textarea>
+
+        <p id="contact-err" class="error" role="alert"></p>
+
+        <button type="submit" class="btn btn-primary">Abrir correo</button>
+      </form>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        <a href="https://github.com/DRO98/madrid-inteligencia-comercial" rel="noopener noreferrer">GitHub</a>
+        · <a href="./index.html">Inicio</a>
+      </p>
+    </footer>
+
+    <script>
+      (function () {
+        var form = document.getElementById('contact-form');
+        var err = document.getElementById('contact-err');
+        var mailto = 'hola@madrid-economico.local';
+        form.addEventListener('submit', function (e) {
+          e.preventDefault();
+          err.textContent = '';
+          var name = document.getElementById('c-name').value.trim();
+          var email = document.getElementById('c-email').value.trim();
+          var subject = document.getElementById('c-subject').value.trim();
+          var body = document.getElementById('c-body').value.trim();
+          if (!name || !email || !subject || !body) {
+            err.textContent = 'Rellena todos los campos.';
+            return;
+          }
+          var q =
+            'subject=' +
+            encodeURIComponent(subject) +
+            '&body=' +
+            encodeURIComponent(
+              body + '\n\n— ' + name + ' <' + email + '>'
+            );
+          window.location.href = 'mailto:' + mailto + '?' + q;
+        });
+      })();
+    </script>
+  </body>
+</html>

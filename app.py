@@ -1,38 +1,175 @@
 ﻿import random
+import re
 
+import folium
 import pandas as pd
 import streamlit as st
-from src.features.recommender import (
-    MIN_LOCALES_EPIGRAFE_MADRID,
-    conteos_locales_por_epigrafe_madrid,
-    generar_ranking_barrios,
-    lista_epigrafes_con_soporte,
-)
-from util_text import generar_texto_analista
+from branca.element import Element
+from folium.plugins import HeatMap
+from streamlit_folium import st_folium
 
-st.set_page_config(page_title='Analista de Inversiones - Madrid', layout='wide')
+from negocios import (
+    MIN_LOCALES_EPIGRAFE_MADRID,
+    PERFIL_RENTA_LABEL,
+    PUBLICO_LABEL_Y_SCORE,
+    conteos_locales_por_epigrafe_madrid,
+    ficha_local_html,
+    lista_epigrafes_con_soporte,
+    negocios_scored,
+    popup_marcador_streamlit_html,
+    preparar_tabla_negocios,
+)
+
+st.set_page_config(page_title="Analista de Inversiones - Madrid", layout="wide")
+
+_BUSCAR_ICON_HTML = (
+    '<div style="font-size:22px;line-height:28px;width:28px;height:28px;text-align:center;'
+    'text-shadow:0 1px 3px rgba(0,0,0,.45);">🔍</div>'
+)
+
+
+def _folium_icon_buscar() -> folium.DivIcon:
+    return folium.DivIcon(
+        html=_BUSCAR_ICON_HTML,
+        icon_size=(28, 28),
+        icon_anchor=(14, 14),
+        popup_anchor=(0, -12),
+        class_name="marker-buscar-local",
+    )
+
+
+def _folium_sin_fondo_iconos(mapa: folium.Map) -> None:
+    mapa.get_root().header.add_child(
+        Element(
+            "<style>"
+            ".marker-buscar-local.leaflet-marker-icon,"
+            ".marker-buscar-local.leaflet-div-icon{"
+            "background:transparent!important;border:none!important;}"
+            ".popup-map-mini{font-size:13px;line-height:1.45;max-width:260px;padding:2px 0;}"
+            ".popup-map-mini-epi{opacity:.88;font-size:12px;margin-top:4px;}"
+            ".popup-map-mini-hint{opacity:.72;font-size:11px;margin-top:6px;}"
+            "</style>"
+        )
+    )
+
+
+def _indice_marcador_desde_popup(raw: object | None) -> int | None:
+    if raw is None:
+        return None
+    s = str(raw)
+    m = re.search(r'data-midx="(\d+)"', s)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"data-midx=&quot;(\d+)&quot;", s)
+    return int(m.group(1)) if m else None
+
+
+def _indice_marcador_desde_click(
+    click_obj: object | None,
+    coords_por_ix: list[tuple[int, float, float]],
+    tol_grados: float = 5e-6,
+) -> int | None:
+    """Fallback robusto: resuelve fila por coordenadas del marcador clicado."""
+    if not isinstance(click_obj, dict):
+        return None
+    lat = click_obj.get("lat")
+    lon = click_obj.get("lng", click_obj.get("lon"))
+    try:
+        lat_f = float(lat)
+        lon_f = float(lon)
+    except (TypeError, ValueError):
+        return None
+    best_ix: int | None = None
+    best_d = float("inf")
+    for ix, mlat, mlon in coords_por_ix:
+        d = abs(mlat - lat_f) + abs(mlon - lon_f)
+        if d < best_d:
+            best_d = d
+            best_ix = ix
+    if best_ix is None or best_d > tol_grados:
+        return None
+    return best_ix
 
 
 def _ensure_session_state() -> None:
-    """Inicializa claves de la app; llamar tras set_page_config y antes de leer resultados."""
-    if 'analizado' not in st.session_state:
-        st.session_state['analizado'] = False
-    if 'resultados' not in st.session_state:
-        st.session_state['resultados'] = pd.DataFrame()
-    if 'ctx_epigrafe' not in st.session_state:
-        st.session_state['ctx_epigrafe'] = None
-    if 'ctx_metros' not in st.session_state:
-        st.session_state['ctx_metros'] = None
+    if "analizado" not in st.session_state:
+        st.session_state["analizado"] = False
+    if "salida_negocios" not in st.session_state:
+        st.session_state["salida_negocios"] = None
+    if "panel_local_marcador_ix" not in st.session_state:
+        st.session_state["panel_local_marcador_ix"] = None
 
 
 _ensure_session_state()
 
-st.title('Inteligencia Inmobiliaria y Comercial (Madrid) V4')
-st.caption('Asistente Avanzado potenciado con Datos Empíricos Reales de Turismo y Aforo Peatonal')
+st.title("Inteligencia Inmobiliaria y Comercial (Madrid)")
+st.caption(
+    "Ranking de locales (`negocios.py`): varios públicos (media de scores de censo), renta, presupuesto dinámico, "
+    "competencia local, tránsito y atractivo. Índices y costes por candidato en los popups del Mapa 1."
+)
+st.markdown(
+    """
+<style>
+.stApp {
+    background: #f5f7fb;
+    color: #1f2937;
+}
+[data-testid="stAppViewContainer"] p,
+[data-testid="stAppViewContainer"] li {
+    font-size: 1.02rem;
+    line-height: 1.6;
+}
+[data-testid="stMarkdownContainer"] h3 {
+    font-size: 1.9rem;
+    line-height: 1.2;
+    margin-top: .45rem;
+    color: #1e3a5f;
+}
+.stAlert {
+    border-radius: 12px;
+}
+.streamlit-local-ficha {
+    font-size: 1.02rem;
+    line-height: 1.6;
+}
+.streamlit-local-ficha .local-ficha-inner {
+    border: 1px solid #d7dee8;
+    border-radius: 14px;
+    padding: 1rem 1.1rem;
+    background: #ffffff;
+    box-shadow: 0 8px 20px rgba(30, 58, 95, 0.08);
+}
+.streamlit-local-ficha .ficha-titulo {
+    margin: 0 0 .7rem;
+    font-size: 1.02rem;
+    color: #0f2742;
+}
+.streamlit-local-ficha .ficha-line {
+    margin: .5rem 0;
+    font-size: .98rem;
+}
+.streamlit-local-ficha .ficha-etiq {
+    opacity: .78;
+    font-size: .8rem;
+    text-transform: uppercase;
+    letter-spacing: .045em;
+    color: #415a77;
+}
+.streamlit-local-ficha .ficha-sub {
+    opacity: .82;
+    font-size: .9rem;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 
 @st.cache_data
-def cargar_datos():
-    return pd.read_csv('data/processed/negocios_scored.csv')
+def cargar_datos() -> pd.DataFrame:
+    df_raw = pd.read_csv("data/processed/negocios_scored.csv")
+    return preparar_tabla_negocios(df_raw)
+
 
 df = cargar_datos()
 conteos_epigrafe_madrid = conteos_locales_por_epigrafe_madrid(df)
@@ -43,135 +180,222 @@ def _etiqueta_sector_con_conteo(epi: str) -> str:
     n = int(conteos_epigrafe_madrid.get(epi, 0))
     return f"{epi} ({n} locales en Madrid)"
 
+
 _ensure_session_state()
 
-with st.sidebar.form('filtros_analisis'):
-    st.header('Segmentación Target')
+_publico_keys = list(PUBLICO_LABEL_Y_SCORE.keys())
+_publico_etiqueta = {k: PUBLICO_LABEL_Y_SCORE[k][0] for k in _publico_keys}
+_perfil_keys = list(PERFIL_RENTA_LABEL.keys())
+
+with st.sidebar.form("filtros_negocios"):
+    st.header("Filtros")
     if not epigrafes_disponibles:
         st.warning(
-            f'No hay sectores que cumplan el mínimo de **{MIN_LOCALES_EPIGRAFE_MADRID}** locales '
-            'censados distintos en Madrid. Revisa el dataset o baja el umbral en `MIN_LOCALES_EPIGRAFE_MADRID`.'
+            f"No hay sectores con al menos **{MIN_LOCALES_EPIGRAFE_MADRID}** locales "
+            "distintos en Madrid (censo)."
         )
-        epigrafe = ''
+        epigrafe = ""
     else:
         epigrafe = st.selectbox(
-            'Sector del Negocio',
+            "Tipo de negocio (epígrafe)",
             epigrafes_disponibles,
             format_func=_etiqueta_sector_con_conteo,
-            key='sector_epigrafe_min_locales',
-            help=(
-                f'Solo aparecen sectores con ≥ {MIN_LOCALES_EPIGRAFE_MADRID} locales distintos '
-                'en todo Madrid (censo); el número entre paréntesis es ese recuento.'
-            ),
+            help="Actividad censada en Madrid Open Data.",
         )
-    metros_cuadrados = st.number_input('M2 del Local Deseado', min_value=20, max_value=2000, value=100)
-    presupuesto_max = st.number_input('Presupuesto Mensual Max (€)', min_value=500, max_value=50000, value=3500)
-    
-    st.markdown('---')
-    st.subheader('Demografía Múltiple')
-    perfil_renta = st.selectbox('Clase Social', ['Cualquiera', 'Barrios de Alta Renta (Premium)', 'Barrios de Renta Media/Baja (Volumen)'])
-    target_edad = st.selectbox('Segmentos de Edad', ['Todos', 'Estudiantes y Gen Z (15-24 años)', 'Profesionales Jóvenes (25-39 años)', 'Familias / Edad Madura (40-64 años)', 'Seniors y Jubilados (65+ años)'])
-    genero_objetivo = st.selectbox('Prevalencia de Género', ['Ambos', 'Hombres (Público Masculino)', 'Mujeres (Público Femenino)'])
-    horario_objetivo = st.selectbox('Estilo de Ocio', ['Indiferente', 'Ocio Nocturno / Tarde', 'Diurno / Estándar'])
+    publico_objetivo = st.multiselect(
+        "Público / edad objetivo (elige uno o varios)",
+        options=_publico_keys,
+        default=["millennial"],
+        format_func=lambda k: _publico_etiqueta[k],
+        help="Se usa la media de los scores de censo seleccionados (filtro μ−σ y ranking demográfico).",
+    )
+    perfil_renta = st.selectbox(
+        "Perfil renta (zona)",
+        options=_perfil_keys,
+        format_func=lambda k: PERFIL_RENTA_LABEL[k],
+    )
+    presupuesto = st.number_input(
+        "Presupuesto mensual objetivo (€)",
+        min_value=500,
+        max_value=50000,
+        value=3500,
+        help="Banda de coste estimado alrededor de este importe: semiancho dinámico (p. ej. 500 €→±200 €, 10 000 €→±2500 €).",
+    )
+    metros_cuadrados = st.number_input("Superficie deseada (m²)", min_value=20, max_value=2000, value=100)
 
-    st.markdown('---')
-    st.subheader('¡NUEVO! Datos Empíricos')
-    importancia_transito = st.slider('Importancia del Flujo Peatonal', 0.0, 100.0, 50.0, help='Priorizar barrios con el mayor aforo peatonal validado en sensores.')
-    tolerancia_supervivencia = st.slider('Tolerancia Supervivencia Comercial', 0.0, 100.0, 50.0, help='Sube este valor para priorizar barrios donde los negocios sobreviven más.')
-
-    submitted = st.form_submit_button('Ejecutar Análisis Espacial ')
+    submitted = st.form_submit_button("Buscar locales")
 
 _ensure_session_state()
 
 if submitted and not epigrafes_disponibles:
-    st.session_state['analizado'] = False
-    st.error('No se puede ejecutar el análisis sin sectores con muestra suficiente.')
+    st.session_state["analizado"] = False
+    st.session_state["salida_negocios"] = None
+    st.error("No hay sectores disponibles.")
 elif submitted:
-    try:
-        with st.spinner('Calculando ranking y señales por barrio (puede tardar unos segundos la primera vez)…'):
-            out = generar_ranking_barrios(
-                df=df,
-                epigrafe_objetivo=epigrafe,
-                perfil_renta=perfil_renta,
-                target_edad=target_edad,
-                genero_objetivo=genero_objetivo,
-                horario_objetivo=horario_objetivo,
-                metros_cuadrados=metros_cuadrados,
-                presupuesto_max=presupuesto_max,
-                importancia_transito=importancia_transito,
-                tolerancia_supervivencia=tolerancia_supervivencia,
-            )
-        st.session_state['resultados'] = out
-        st.session_state['analizado'] = True
-        st.session_state['ctx_epigrafe'] = epigrafe
-        st.session_state['ctx_metros'] = int(metros_cuadrados)
-    except Exception as exc:
-        st.session_state['analizado'] = False
-        st.session_state['resultados'] = pd.DataFrame()
-        st.error('Error al calcular el ranking. Detalle técnico:')
-        st.exception(exc)
-
-import folium
-from folium.plugins import HeatMap
-from streamlit_folium import st_folium
+    if not publico_objetivo:
+        st.error("Selecciona al menos un segmento de edad / público objetivo.")
+    else:
+        try:
+            with st.spinner("Filtrando locales…"):
+                out = negocios_scored(
+                    df,
+                    tipo_negocio=epigrafe,
+                    publico_objetivo=publico_objetivo,
+                    presupuesto=float(presupuesto),
+                    metros_requeridos=float(metros_cuadrados),
+                    perfil_renta=perfil_renta,
+                )
+            st.session_state["salida_negocios"] = out
+            st.session_state["analizado"] = True
+            st.session_state["panel_local_marcador_ix"] = None
+            st.session_state["ctx_epigrafe"] = epigrafe
+            st.session_state["ctx_publico"] = list(publico_objetivo)
+            st.session_state["ctx_perfil_renta"] = perfil_renta
+            st.session_state["ctx_metros"] = int(metros_cuadrados)
+            st.session_state["ctx_presupuesto"] = float(presupuesto)
+        except Exception as exc:
+            st.session_state["analizado"] = False
+            st.session_state["salida_negocios"] = None
+            st.error("Error al ejecutar la búsqueda.")
+            st.exception(exc)
 
 _ensure_session_state()
 
-if st.session_state.get('analizado', False):
-    resultados = st.session_state.get('resultados')
-    if resultados is None:
-        resultados = pd.DataFrame()
-    ep_disp = st.session_state.get('ctx_epigrafe') or ''
-    ctx_metros = st.session_state.get('ctx_metros')
-    met_disp = ctx_metros if ctx_metros is not None else metros_cuadrados
-    if resultados is None or resultados.empty:
-        st.error('Ningún barrio de Madrid cumple con estas estrictas condiciones. Prueba a aumentar tu Presupuesto Mensual Máximo o relajar otros criterios.')
+if st.session_state.get("analizado") and st.session_state.get("salida_negocios"):
+    salida = st.session_state["salida_negocios"]
+    locales: pd.DataFrame = salida["locales"]
+    barrios: list = salida["barrios"]
+    ep_disp = st.session_state.get("ctx_epigrafe") or ""
+
+    meta = salida.get("meta") or {}
+    if locales is None or locales.empty:
+        st.warning(
+            "Ningún local cumple los filtros (demografía, renta, presupuesto, coste). "
+            "Prueba a relajar perfil de renta o el presupuesto."
+        )
     else:
-        st.success(f'Análisis completado. Listando las {len(resultados)} zonas más atractivas...')
-        
-        col1, col2 = st.columns([1, 1])
+        m_pb = meta.get("margen_presupuesto", "—")
+        st.success(
+            f"**{len(locales)}** mejores locales por **índice global** (percentil en el conjunto filtrado; top 20). "
+            f"Barrios: **{', '.join(barrios)}**. Banda presupuesto ±**{m_pb}** €. "
+            "Pulsa una lupa 🔍 en el mapa: la ficha completa se muestra en el **panel al lado**."
+        )
 
-        with col1:
-            for rank_idx, (i, row) in enumerate(resultados.iterrows(), 1):
-                with st.expander(
-                    f"Ranking #{rank_idx}: Barrio de {row['desc_barrio_local']} (Puntuación: {row['score_inversion']:.1f}/100)",
-                    expanded=(rank_idx <= 3),
-                ):
-                    st.markdown(generar_texto_analista(row, ep_disp, met_disp))
-
-        with col2:
-            st.subheader('Mapa de Densidad Comercial')
-            # Misma ejecución que el ranking (evita desync si cambias el selector después)
-            df_mapa = df[df['desc_epigrafe'] == ep_disp].copy() if ep_disp else pd.DataFrame()
-            if not df_mapa.empty and 'lat' in df_mapa.columns and 'lon' in df_mapa.columns:
-                df_mapa = df_mapa.dropna(subset=['lat', 'lon'])
-                # Excluir coords (0,0) y valores fuera del municipio (p. ej. locales agrupados mal geocodificados)
-                df_mapa = df_mapa[
-                    df_mapa['lat'].between(40.28, 40.58)
-                    & df_mapa['lon'].between(-3.95, -3.52)
-                ]
-                # Un punto por local censado (evita duplicar calor si hay varias filas por id_local)
-                if 'id_local' in df_mapa.columns:
-                    df_mapa = df_mapa.drop_duplicates(subset=['id_local'], keep='first')
-                n_locales_sector = int(df.loc[df['desc_epigrafe'] == ep_disp, 'id_local'].nunique())
-                n_mapa = len(df_mapa)
-                max_puntos_calor = 4000
-                st.caption(
-                    f'Calor con **{n_mapa}** ubicaciones distintas (`id_local`) dentro de Madrid; '
-                    f'el sector tiene **{n_locales_sector}** locales censados en total. '
-                    f'Si hay más de {max_puntos_calor} puntos, el mapa muestrea aleatoriamente para no bloquear el navegador.'
-                )
-                if n_mapa > 0:
-                    m = folium.Map(location=[40.4168, -3.7038], zoom_start=11)
-                    heat_data = df_mapa[['lat', 'lon']].values.tolist()
-                    if len(heat_data) > max_puntos_calor:
-                        rng = random.Random(42)
-                        heat_data = rng.sample(heat_data, max_puntos_calor)
-                    HeatMap(heat_data, radius=12, blur=15, max_zoom=13).add_to(m)
-                    st_folium(m, use_container_width=True, height=480)
-                else:
-                    st.info(
-                        'No hay coordenadas válidas para este sector en el dataset (o todas quedan fuera del bbox de Madrid).'
-                    )
+        # --- Mapa 1: candidatos ---
+        st.markdown("### Tus locales destacados en la ciudad")
+        st.markdown(
+            "Cada **lupa** 🔍 marca un sitio que encaja con tu sector, público y presupuesto. "
+            "En el mapa solo verás un resumen; **la ficha detallada aparece al lado** al hacer clic."
+        )
+        m_reco = folium.Map(location=[40.4168, -3.7038], zoom_start=12)
+        _folium_sin_fondo_iconos(m_reco)
+        icon_buscar = _folium_icon_buscar()
+        puntos_validos: list[tuple[float, float]] = []
+        filas_en_mapa: list[pd.Series] = []
+        coords_por_ix: list[tuple[int, float, float]] = []
+        for _, row in locales.iterrows():
+            lat, lon = row.get("lat"), row.get("lon")
+            if pd.isna(lat) or pd.isna(lon):
+                continue
+            lat_f, lon_f = float(lat), float(lon)
+            if not (40.28 <= lat_f <= 40.58 and -3.95 <= lon_f <= -3.52):
+                continue
+            puntos_validos.append((lat_f, lon_f))
+            ix_m = len(filas_en_mapa)
+            filas_en_mapa.append(row)
+            coords_por_ix.append((ix_m, lat_f, lon_f))
+            bar_txt = str(row.get("desc_barrio_local", "") or "")[:72]
+            folium.Marker(
+                [lat_f, lon_f],
+                icon=icon_buscar,
+                popup=folium.Popup(
+                    popup_marcador_streamlit_html(row, ix_m),
+                    max_width=280,
+                ),
+                tooltip=f"🔍 {bar_txt}" if bar_txt else "🔍 Ver ficha al lado",
+            ).add_to(m_reco)
+        n_marcadores = len(filas_en_mapa)
+        if puntos_validos:
+            if len(puntos_validos) == 1:
+                m_reco.location = list(puntos_validos[0])
+                m_reco.zoom_start = 15
             else:
-                st.info('No hay datos de mapa para este epígrafe (columnas lat/lon ausentes o tabla vacía).')
+                lats = [p[0] for p in puntos_validos]
+                lons = [p[1] for p in puntos_validos]
+                m_reco.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]], padding=(24, 24))
+            st.caption(
+                f"**{n_marcadores}** ubicaciones en el mapa. Clic en una lupa para cargar la ficha en el panel."
+            )
+            col_mapa, col_ficha = st.columns([1.45, 1])
+            with col_mapa:
+                out_map = st_folium(m_reco, width=None, height=440, key="mapa_locales_reco")
+            if out_map:
+                ix_click = _indice_marcador_desde_popup(out_map.get("last_object_clicked_popup"))
+                if ix_click is None:
+                    ix_click = _indice_marcador_desde_click(
+                        out_map.get("last_object_clicked"),
+                        coords_por_ix,
+                    )
+                if ix_click is not None:
+                    st.session_state["panel_local_marcador_ix"] = ix_click
+            with col_ficha:
+                ix_sel = st.session_state.get("panel_local_marcador_ix")
+                if ix_sel is not None and 0 <= ix_sel < len(filas_en_mapa):
+                    st.markdown(
+                        '<div class="streamlit-local-ficha">'
+                        + ficha_local_html(filas_en_mapa[ix_sel])
+                        + "</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.caption(
+                        "Haz clic en una **lupa** del mapa para ver aquí superficie, alquiler orientativo "
+                        "y el resto de datos sin tapar el plano."
+                    )
+        else:
+            st.info(
+                "Hay locales candidatos pero sin coordenadas válidas en Madrid para pintar marcadores."
+            )
+
+    # --- Mapa 2: calor sector ---
+    st.markdown("### Dónde está de verdad tu sector en Madrid")
+    st.markdown(
+        "Aquí no es un ranking: muestra **dónde hay más locales como el tuyo** según el censo. "
+        "Las zonas más calientes son donde esa actividad está más concentrada; las claras, donde hay menos. "
+        "Te ayuda a situarte: ¿vas a un barrio muy cargado de tu mismo tipo de negocio o a uno con menos competencia directa?"
+    )
+    df_mapa = df[df["desc_epigrafe"] == ep_disp].copy() if ep_disp else pd.DataFrame()
+    if not df_mapa.empty and "lat" in df_mapa.columns and "lon" in df_mapa.columns:
+        df_mapa = df_mapa.dropna(subset=["lat", "lon"])
+        df_mapa = df_mapa[
+            df_mapa["lat"].between(40.28, 40.58) & df_mapa["lon"].between(-3.95, -3.52)
+        ]
+        if "id_local" in df_mapa.columns:
+            df_mapa = df_mapa.drop_duplicates(subset=["id_local"], keep="first")
+        n_locales_sector = int(df.loc[df["desc_epigrafe"] == ep_disp, "id_local"].nunique())
+        max_puntos_calor = 4000
+        heat_data = df_mapa[["lat", "lon"]].values.tolist()
+        n_ubicaciones = len(heat_data)
+        if n_ubicaciones > max_puntos_calor:
+            rng = random.Random(42)
+            heat_data = rng.sample(heat_data, max_puntos_calor)
+        n_mostrados = len(heat_data)
+        if n_ubicaciones > max_puntos_calor:
+            st.caption(
+                f"En Madrid hay **{n_locales_sector}** locales de este tipo registrados; "
+                f"podemos situar **{n_ubicaciones}** en el mapa. Para que no se quede colgado el navegador, "
+                f"aquí ves **{n_mostrados}** puntos elegidos al azar entre todos."
+            )
+        else:
+            st.caption(
+                f"En Madrid hay **{n_locales_sector}** locales de este tipo registrados; "
+                f"este mapa muestra **{n_mostrados}** ubicaciones donde aparecen en el censo."
+            )
+        if n_ubicaciones > 0:
+            m_heat = folium.Map(location=[40.4168, -3.7038], zoom_start=11)
+            HeatMap(heat_data, radius=12, blur=15, max_zoom=13).add_to(m_heat)
+            st_folium(m_heat, width=None, height=480, key="mapa_calor_sector")
+        else:
+            st.info("No hay ubicaciones con coordenadas para dibujar este mapa.")
+    else:
+        st.info("No hay datos de ubicación para este sector en la tabla.")

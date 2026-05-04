@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Explorar · Madrid económico</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2026.3.1/core.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="./static/app.css" />
+    <script type="module" src="https://pyscript.net/releases/2026.3.1/core.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="./static/maps.js"></script>
+    <script src="./static/wizard.js"></script>
+  </head>
+  <body class="site-layout page-explorar">
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Principal">
+        <a class="site-brand" href="./index.html" aria-label="MadridLocal, inicio">
+          <img src="./static/madridlocal.png" alt="" class="site-brand-logo" decoding="async" />
+        </a>
+        <div class="site-nav-links">
+          <a href="./explorar.html" aria-current="page">Explorar</a>
+          <a href="./nosotros.html">Quiénes somos</a>
+          <a href="./contacto.html">Contacto</a>
+        </div>
+      </nav>
+    </header>
+
+    <main class="site-main explorar-main">
+      <header class="explorar-intro">
+        <h1>Explorar ubicaciones</h1>
+        <p class="explorar-lead">
+          Responde cada paso; al final se ejecuta el análisis y aparecen los mapas. La primera carga descarga el
+          dataset y puede tardar unos segundos.
+        </p>
+      </header>
+
+      <section class="wizard-shell" aria-labelledby="wizard-step-label">
+        <div class="wizard-progress" aria-hidden="true">
+          <div class="wizard-progress-bar-fill"></div>
+        </div>
+        <p id="wizard-step-label" class="wizard-step-label">Paso 1 de 6</p>
+
+        <div class="wizard-step" data-step="1">
+          <h2 class="wizard-step-title">¿Qué tipo de negocio buscas?</h2>
+          <p class="wizard-hint">
+            Primero elige sector para no mostrar un listado gigante; luego selecciona un negocio concreto.
+          </p>
+
+          <div class="wizard-field-group">
+            <label for="sector-select">Sector</label>
+            <select id="sector-select" name="sector-select" class="wizard-select">
+              <option value="">Cargando sectores…</option>
+            </select>
+          </div>
+
+          <div class="wizard-field-group wizard-field-group--after-sector">
+            <label for="negocio-select">Negocio (selector)</label>
+            <select id="negocio-select" name="negocio-select" class="wizard-select">
+              <option value="">Selecciona un sector primero…</option>
+            </select>
+          </div>
+
+          <select id="epigrafe" name="epigrafe" class="hidden-native-select" aria-hidden="true" tabindex="-1">
+            <option value="">Cargando…</option>
+          </select>
+        </div>
+
+        <div class="wizard-step" data-step="2" hidden>
+          <h2 class="wizard-step-title">¿A quién quieres atraer?</h2>
+          <p class="wizard-hint">Puedes marcar varios perfiles; el modelo pondera cada uno.</p>
+          <fieldset class="pub-multi wizard-fieldset">
+            <legend>Público objetivo</legend>
+            <label class="chk-row"
+              ><input type="checkbox" name="publico_obj" value="joven" /> Joven (15–24)</label
+            >
+            <label class="chk-row"
+              ><input type="checkbox" name="publico_obj" value="millennial" checked /> Profesionales jóvenes (25–39)</label
+            >
+            <label class="chk-row"
+              ><input type="checkbox" name="publico_obj" value="familiar" /> Familias (40–64)</label
+            >
+            <label class="chk-row"
+              ><input type="checkbox" name="publico_obj" value="senior" /> Senior (65+)</label
+            >
+          </fieldset>
+        </div>
+
+        <div class="wizard-step" data-step="3" hidden>
+          <h2 class="wizard-step-title">¿Qué perfil de renta encaja con tu zona ideal?</h2>
+          <p class="wizard-hint">Filtra barrios según nivel de renta de hogares (aproximación censal).</p>
+          <label for="perfil_renta">Perfil renta (zona)</label>
+          <select id="perfil_renta" class="wizard-select">
+            <option value="cualquiera" selected>Cualquiera</option>
+            <option value="premium">Mercado premium (alta renta)</option>
+            <option value="estandar">Mercado estándar / volumen</option>
+          </select>
+        </div>
+
+        <div class="wizard-step" data-step="4" hidden>
+          <h2 class="wizard-step-title">¿Cuántos metros cuadrados necesitas?</h2>
+          <p class="wizard-hint">Superficie orientativa del local (mínimo 20 m²).</p>
+          <label for="metros">Superficie (m²)</label>
+          <input id="metros" type="number" min="20" max="2000" value="100" />
+        </div>
+
+        <div class="wizard-step" data-step="5" hidden>
+          <h2 class="wizard-step-title">¿Qué presupuesto mensual de alquiler manejas?</h2>
+          <p class="wizard-hint">En euros al mes (orientativo; el modelo usa una banda alrededor de este valor).</p>
+          <label for="presupuesto">Presupuesto mensual objetivo (€)</label>
+          <input id="presupuesto" type="number" min="500" max="50000" value="3500" />
+        </div>
+
+        <div class="wizard-step" data-step="6" hidden>
+          <h2 class="wizard-step-title">Resumen y análisis</h2>
+          <p class="wizard-hint">Revisa los datos. Si todo cuadra, lanza el análisis para ver los mapas abajo.</p>
+          <div id="wizard-summary" class="wizard-summary"></div>
+        </div>
+
+        <div class="wizard-actions">
+          <button type="button" id="wizard-back" class="btn btn-ghost" hidden>Atrás</button>
+          <button type="button" id="wizard-next" class="btn btn-primary">Siguiente</button>
+        </div>
+
+        <button type="button" id="btn-run" class="btn-run-hidden" tabindex="-1" aria-hidden="true">
+          Ejecutar análisis
+        </button>
+
+        <p id="status-msg" class="status wizard-status">Iniciando…</p>
+        <p id="err-msg" class="error"></p>
+      </section>
+
+      <div id="results-cards" class="results-cards" aria-live="polite"></div>
+
+      <section
+        id="maps-results"
+        class="maps-stack maps-results maps-results--hidden"
+        aria-hidden="true"
+      >
+        <div class="map-block">
+          <h3 class="map-fancy-title">Tus locales destacados en la ciudad</h3>
+          <p class="map-human-desc">
+            Cada <strong>lupa</strong> 🔍 es una opción que encaja con tu sector, público y presupuesto. La
+            <strong>ficha completa</strong> aparece en el panel junto al mapa al hacer clic.
+          </p>
+          <p id="map-reco-caption" class="cap muted"></p>
+          <div class="reco-split">
+            <aside id="local-detail-panel" class="local-detail-panel" aria-live="polite">
+              <p class="detail-placeholder muted">
+                Haz clic en una lupa del mapa para ver aquí la ficha completa del local (superficie, alquiler
+                orientativo, etc.).
+              </p>
+            </aside>
+            <div class="map-reco-host">
+              <div id="map-reco" class="map-box"></div>
+            </div>
+          </div>
+        </div>
+        <div class="map-block">
+          <h3 class="map-fancy-title">Dónde está de verdad tu sector en Madrid</h3>
+          <p class="map-human-desc">
+            Densidad aproximada del mismo epígrafe según el censo: zonas más calientes = más locales como el tuyo
+            juntos; sirve para situar competencia agregada, no para elegir un único local.
+          </p>
+          <p id="map-heat-caption" class="cap muted"></p>
+          <div id="map-heat" class="map-box"></div>
+        </div>
+      </section>
+    </main>
+
+    <script type="py" src="./main.py" config="./pyscript.json"></script>
+  </body>
+</html>

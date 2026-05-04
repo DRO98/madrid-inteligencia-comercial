@@ -27,6 +27,7 @@ WEB_COLUMNS = [
     "id_local",
     "desc_barrio_local",
     "desc_epigrafe",
+    "desc_tipo_acceso_local",
     "es_nocturno",
     "capacidad_exterior_total",
     "terraza_acondicionada",
@@ -68,21 +69,6 @@ def _utm_to_wgs84(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _strip_noct_future(src: str) -> str:
-    lines = []
-    skip_next_blank = False
-    for ln in src.splitlines():
-        if ln.strip() == "from __future__ import annotations":
-            skip_next_blank = True
-            continue
-        if skip_next_blank and ln.strip() == "":
-            skip_next_blank = False
-            continue
-        skip_next_blank = False
-        lines.append(ln)
-    return "\n".join(lines)
-
-
 def _read_py_source(path: Path) -> str:
     """Lee fuente UTF-8 y quita BOM (Pyodide no tolera U+FEFF en medio del código)."""
     text = path.read_text(encoding="utf-8-sig")
@@ -93,23 +79,11 @@ def _read_py_source(path: Path) -> str:
 
 
 def _build_bundle() -> str:
-    future = "from __future__ import annotations\n\n"
-    noct = _read_py_source(_REPO / "src" / "features" / "nocturnidad.py")
-    noct = _strip_noct_future(noct)
-    util = _read_py_source(_REPO / "util_text.py")
-    rec = _read_py_source(_REPO / "src" / "features" / "recommender.py")
-    rec = rec.replace(
-        "from src.features.nocturnidad import serie_nocturno_por_epigrafe\n\n", ""
-    )
+    neg = _read_py_source(_REPO / "negocios.py")
     frag = _read_py_source(_SCRIPTS / "web_pyscript_app.py")
     return (
         "# -*- coding: utf-8 -*-\n# Generado por scripts/build_github_pages.py — no editar.\n\n"
-        + future
-        + noct.strip()
-        + "\n\n"
-        + util.strip()
-        + "\n\n"
-        + rec.strip()
+        + neg.strip()
         + "\n\n"
         + frag.strip()
         + "\n"
