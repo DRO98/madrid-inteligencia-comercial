@@ -25,6 +25,8 @@ data/*.xlsx
 data/*.tsv
 data/*.json
 !data/processed/negocios_scored.csv
+# >100 MB: GitHub rechaza el push; regenerar con notebooks en local
+data/processed/negocios_maestro.csv
 
 # SO
 .DS_Store
