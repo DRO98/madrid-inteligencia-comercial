@@ -3,7 +3,11 @@ Modelo complementario: densidad de mercado esperada (barrio × epígrafe).
 
 Target: log1p(n_locales) con n_locales = id_local distintos por par.
 Entrenamiento con GroupKFold por barrio para métricas honestas; modelo final
-sobre todo el dataset para exportar predicciones al recomendador.
+exporta `data/processed/market_density_lgbm.csv`.
+
+Nota: el recomendador en `src/features/recommender.py` ya no usa estas
+predicciones (el LGBM tendía a subestimar mercados muy densos y sesgaba el score).
+Este módulo queda disponible si quieres reentrenar, analizar o integrar mejor.
 """
 from __future__ import annotations
 

@@ -1,7 +1,132 @@
-import numpy as np
+# -*- coding: utf-8 -*-
+# Generado por scripts/build_github_pages.py — no editar.
+
+from __future__ import annotations
+
+"""
+Señal de nocturnidad.
+
+`actividades.tsv` solo cubre una fracción pequeña del censo de locales; la mayoría
+no tiene `hora_cierre1`. Por eso combinamos el indicador derivado del horario con
+un proxy por epígrafe (locales típicamente nocturnos por definición).
+
+La lista de subcadenas es deliberadamente conservadora para limitar falsos positivos.
+"""
+
+import re
+
 import pandas as pd
 
-from src.features.nocturnidad import serie_nocturno_por_epigrafe
+# Subcadenas en MAYÚSCULAS tal como suelen venir en `desc_epigrafe` (después de .upper()).
+EPIGRAFE_SUBCADENAS_NOCTURNAS: tuple[str, ...] = (
+    "PUB",
+    "DISCOTECA",
+    "SALA DE FIESTAS",
+    "BAR ESPECIAL",
+    "CAFE CONCIERTO",
+    "CAFÉ CONCIERTO",
+    "SALA DE BAILE",
+    "TABERNA",
+)
+
+
+def epigrafe_indica_nocturnidad(desc_epigrafe: str | float | None) -> float:
+    """1.0 si el texto del epígrafe sugiere uso nocturno típico; 0.0 si no."""
+    if desc_epigrafe is None or (isinstance(desc_epigrafe, float) and pd.isna(desc_epigrafe)):
+        return 0.0
+    u = str(desc_epigrafe).upper()
+    return 1.0 if any(s in u for s in EPIGRAFE_SUBCADENAS_NOCTURNAS) else 0.0
+
+
+def serie_nocturno_por_epigrafe(desc_epigrafes: pd.Series) -> pd.Series:
+    """Misma regla que `epigrafe_indica_nocturnidad`, vectorizada (substring segura)."""
+    u = desc_epigrafes.fillna("").astype(str).str.upper()
+    mask = pd.Series(False, index=u.index)
+    for s in EPIGRAFE_SUBCADENAS_NOCTURNAS:
+        mask = mask | u.str.contains(re.escape(s), regex=True, na=False)
+    return mask.astype(float)
+
+def generar_texto_analista(row, epigrafe, metros_cuadrados):
+    # Determinar viabilidad
+    if row['score_inversion'] >= 85:
+        viabilidad = "muy alta"
+    elif row['score_inversion'] >= 65:
+        viabilidad = "alta"
+    else:
+        viabilidad = "media-alta"
+        
+    # Tipo de concepto
+    if row['score_turismo'] > 60 and row['score_transito'] > 60:
+        concepto = f"{epigrafe.lower()} de alto flujo turístico y tracción peatonal continua"
+    elif row['score_turismo'] > 50:
+        concepto = f"{epigrafe.lower()} turístico o semi-premium enfocado a visitantes"
+    elif row['score_transito'] > 50:
+        concepto = f"{epigrafe.lower()} de alto flujo peatonal y rotación"
+    elif row['renta_neta_hogares'] > 45000:
+        concepto = f"{epigrafe.lower()} de destino, boutique o premium enfocado a residentes locales"
+    else:
+        concepto = f"{epigrafe.lower()} urbano, informal, con fuerte tracción de público local"
+        
+    # Riesgo (basado en coste alquiler, competencia y supervivencia)
+    if row['coste_alquiler_estimado'] > 4000 and row['tasa_supervivencia'] < 65:
+        riesgo = "alto (costes fijos elevados y alta mortalidad de negocios)"
+    elif row['coste_alquiler_estimado'] > 3000 or row['competencia_directa'] > 15:
+        riesgo = "medio-alto (exige buena ejecución operativa por alquiler o competencia)"
+    else:
+        riesgo = "medio (equilibrio aceptable de barreras de entrada)"
+        
+    # Motivos
+    motivos = []
+    if row['score_transito'] > 60:
+        motivos.append("tráfico peatonal altísimo")
+    if row['score_turismo'] > 60:
+        motivos.append("fuerte presión turística")
+    if row['renta_neta_hogares'] > 50000:
+        motivos.append("renta residente excepcional")
+    if row['competencia_directa'] > 20:
+        motivos.append(f"mercado muy activo con amplia oferta")
+    if row['tasa_supervivencia'] > 80:
+        motivos.append("alta fidelización comercial")
+        
+    if not motivos:
+        motivo_str = "identidad fuerte, actividad estable y buenas condiciones base."
+    else:
+        motivo_str = " y ".join([", ".join(motivos[:-1]), motivos[-1]] if len(motivos) > 1 else motivos) + "."
+
+    # Formateo de puntuaciones extra
+    turismo_text = f"Nivel {row['score_turismo']:.1f}/100 de concentración en el distrito" if row['score_turismo'] > 0 else "Frecuencia turística no significativa o dato no disponible"
+    transito_text = f"Nivel {row['score_transito']:.1f}/100 de aglomeración registrada por sensores" if row['score_transito'] > 0 else "Tránsito moderado o sensor peatonal no disponible"
+    
+    # Redondeamos o aproximamos valores exactos para no dar falsa precisión
+    renta_aprox = round(row['renta_neta_hogares'] / 1000) * 1000
+    pension_aprox = round(row['pension_media'] / 100) * 100
+    supervivencia_aprox = round(row['tasa_supervivencia'] / 5) * 5
+
+    return f"""
+*Conclusiones del Analista:*
+- **Viabilidad comercial:** {viabilidad}.
+- **Tipo de concepto recomendado:** {concepto}.
+- **Riesgo:** {riesgo}.
+- **Motivo principal:** {motivo_str}
+
+---
+**Estimaciones Matemáticas del Modelo:**
+* Coste de alquiler estimado en la zona: **~{row['precio_m2_alquiler']:.0f} €/m²**.
+* Coste de local comercial aproximado mensual: **~{row['coste_alquiler_estimado']:,.0f} €**
+* Proporción de género predictiva: **~{row['porcentaje_mujeres']:.0f}% Público Femenino**.
+
+**Datos Empíricos del INE (Aproximaciones Generales):**
+* Renta Neta Media de Hogares general: **entorno a {renta_aprox:,.0f} €**
+* Tasa de Supervivencia Comercial: **sobre el {supervivencia_aprox}%**.
+* Economía Senior: Pensión media en la zona de **~{pension_aprox:,.0f} €**.
+
+**Señales Reales de Actividad y Presión Espacial:**
+* **Ocupación Turística (Airbnbs VUT):** {turismo_text}.
+* **Flujo Peatonal Medio:** {transito_text}.
+"""
+
+import numpy as np
+import pandas as pd
 
 # Mínimo de locales distintos en Madrid (censo) por epígrafe para considerar el sector usable en la UI y el ranking.
 MIN_LOCALES_EPIGRAFE_MADRID = 100
@@ -338,3 +463,189 @@ def generar_ranking_barrios(
     ]
     salida = ranking[columnas_return].copy()
     return salida.head(5)
+
+# Fragmento concatenado tras nocturnidad + util_text + recommender (ver build_github_pages.py).
+
+import asyncio
+import html as html_lib
+import io
+import json
+import random
+import re
+
+import pandas as pd
+from js import updateHeatmap
+from pyodide.http import pyfetch
+from pyscript import document, web, when
+
+_df: pd.DataFrame | None = None
+_epigrafes: list[str] = []
+_conteos: dict[str, int] = {}
+_load_lock: asyncio.Lock | None = None
+
+
+def _analista_html(mdish: str) -> str:
+    t = html_lib.escape(mdish)
+    t = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
+    return t.replace("\n", "<br/>")
+
+
+async def ensure_data_loaded() -> None:
+    """Descarga gzip una vez y rellena el selector de sectores."""
+    global _df, _epigrafes, _conteos, _load_lock
+
+    if _load_lock is None:
+        _load_lock = asyncio.Lock()
+
+    async with _load_lock:
+        status = web.page["status-msg"]
+        if _df is not None:
+            return
+
+        status.innerHTML = "<span>Cargando Pyodide…</span>"
+        resp = await pyfetch("data/negocios_web.csv.gz")
+        raw = await resp.bytes()
+        status.innerHTML = "<span>Parseando tabla (~146k filas, CPU intensivo)</span>"
+        loop = asyncio.get_event_loop()
+        _df = await loop.run_in_executor(
+            None, lambda: pd.read_csv(io.BytesIO(raw), compression="gzip")
+        )
+
+        cnt = conteos_locales_por_epigrafe_madrid(_df)
+        _conteos = {str(k): int(v) for k, v in cnt.items()}
+        _epigrafes = lista_epigrafes_con_soporte(_df, MIN_LOCALES_EPIGRAFE_MADRID)
+
+        sel = web.page["epigrafe"]
+        sel.innerHTML = ""
+        if not _epigrafes:
+            opt = document.createElement("option")
+            opt.value = ""
+            opt.innerText = f"Sin sectores (mínimo {MIN_LOCALES_EPIGRAFE_MADRID} locales)"
+            sel.appendChild(opt)
+            status.innerHTML = "<strong>No hay epígrafes con muestra suficiente.</strong>"
+            return
+
+        for ep in _epigrafes:
+            n = int(_conteos.get(ep, 0))
+            opt = document.createElement("option")
+            opt.value = ep
+            opt.innerText = f"{ep} ({n} locales en Madrid)"
+            sel.appendChild(opt)
+
+        status.innerHTML = (
+            "<strong>Listo.</strong> Ajusta filtros y pulsa <em>Ejecutar análisis</em>."
+        )
+
+
+def _start_run(_event=None):
+    asyncio.create_task(_run_analysis())
+
+
+@when("click", "#btn-run")
+def on_run_click(_event=None):
+    _start_run(_event)
+
+
+async def _run_analysis():
+    err = web.page["err-msg"]
+    err.innerHTML = ""
+    await ensure_data_loaded()
+
+    assert _df is not None
+
+    ep = web.page["epigrafe"].value
+    if not ep:
+        err.innerHTML = "Selecciona un sector válido."
+        return
+
+    metros = int(web.page["metros"].value or 100)
+    presupuesto = float(web.page["presupuesto"].value or 3500)
+    perfil_renta = web.page["perfil_renta"].value
+    target_edad = web.page["target_edad"].value
+    genero_objetivo = web.page["genero_objetivo"].value
+    horario_objetivo = web.page["horario_objetivo"].value
+    importancia_transito = float(web.page["importancia_transito"].value or 50)
+    tolerancia_supervivencia = float(web.page["tolerancia_supervivencia"].value or 50)
+
+    res_cards = web.page["results-cards"]
+    map_cap = web.page["map-caption"]
+    res_cards.innerHTML = "<p>Calculando ranking…</p>"
+    map_cap.innerText = ""
+
+    loop = asyncio.get_event_loop()
+
+    def work():
+        return generar_ranking_barrios(
+            df=_df,
+            epigrafe_objetivo=ep,
+            perfil_renta=perfil_renta,
+            target_edad=target_edad,
+            genero_objetivo=genero_objetivo,
+            horario_objetivo=horario_objetivo,
+            metros_cuadrados=metros,
+            presupuesto_max=presupuesto,
+            importancia_transito=importancia_transito,
+            tolerancia_supervivencia=tolerancia_supervivencia,
+        )
+
+    try:
+        out = await loop.run_in_executor(None, work)
+    except Exception as exc:  # pragma: no cover
+        err.innerHTML = html_lib.escape(f"Error: {exc!r}")
+        res_cards.innerHTML = ""
+        return
+
+    if out.empty:
+        res_cards.innerHTML = (
+            "<p class=\"warn\">Ningún barrio cumple los criterios. "
+            "Sube presupuesto o relaja filtros.</p>"
+        )
+        updateHeatmap(json.dumps([]))
+        return
+
+    head = (
+        "<p class=\"ok\">Ranking generado. "
+        f"Sector <strong>{html_lib.escape(ep)}</strong>; m²: {metros}.</p>"
+    )
+    ranks: list[str] = []
+    for rank_idx, (_, row) in enumerate(out.iterrows(), 1):
+        title = (
+            f"#{rank_idx} · {html_lib.escape(str(row['desc_barrio_local']))} "
+            f"— score {float(row['score_inversion']):.1f}/100"
+        )
+        expanded = " open" if rank_idx <= 3 else ""
+        body = _analista_html(generar_texto_analista(row, ep, metros))
+        ranks.append(
+            f"<details class=\"rank\"{expanded}><summary>{title}</summary><div>{body}</div></details>"
+        )
+
+    max_pts = 4000
+    df_m = _df[_df["desc_epigrafe"] == ep].dropna(subset=["lat", "lon"])
+    df_m = df_m[
+        (df_m["lat"].between(40.28, 40.58)) & (df_m["lon"].between(-3.95, -3.52))
+    ]
+    if "id_local" in df_m.columns:
+        df_m = df_m.drop_duplicates(subset=["id_local"], keep="first")
+    coords = df_m[["lat", "lon"]].values.tolist()
+    if len(coords) > max_pts:
+        rng = random.Random(42)
+        coords = rng.sample(coords, max_pts)
+    n_sector = int(_df.loc[_df["desc_epigrafe"] == ep, "id_local"].nunique())
+    map_cap.innerHTML = html_lib.escape(
+        f"Puntos calor: {len(coords)} (máx. {max_pts}). Locales censados únicos sector: {n_sector}."
+    )
+
+    res_cards.innerHTML = head + "".join(ranks)
+    updateHeatmap(json.dumps(coords))
+
+
+async def boot():
+    try:
+        await ensure_data_loaded()
+    except Exception as exc:  # pragma: no cover
+        web.page["status-msg"].innerHTML = html_lib.escape(
+            f"No se pudieron cargar los datos ({exc}). Revisa que sirves desde http.server/GitHub Pages (no file://)."
+        )
+
+
+asyncio.ensure_future(boot())

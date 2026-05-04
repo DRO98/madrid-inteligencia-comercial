@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Inteligencia Inmobiliaria y Comercial (Madrid)</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2026.3.1/core.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="./static/app.css" />
+    <script type="module" src="https://pyscript.net/releases/2026.3.1/core.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script>
+(function () {
+  let mapEl, heatLayer, mapReady = false;
+
+  window.initHeatMap = function () {
+    mapEl = L.map('map').setView([40.4168, -3.7038], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap',
+    }).addTo(mapEl);
+    setTimeout(function () { mapEl.invalidateSize(); }, 300);
+    mapReady = true;
+  };
+
+  window.updateHeatmap = function (jsonStr) {
+    if (!mapReady || !mapEl) return;
+    try {
+      if (heatLayer) {
+        mapEl.removeLayer(heatLayer);
+        heatLayer = null;
+      }
+      const pts = JSON.parse(jsonStr);
+      if (!pts.length) return;
+      heatLayer = L.heatLayer(pts, { radius: 12, blur: 15, maxZoom: 13 }).addTo(mapEl);
+      mapEl.invalidateSize(true);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  window.addEventListener('DOMContentLoaded', function () {
+    initHeatMap();
+  });
+})();
+    </script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Inteligencia Inmobiliaria y Comercial (Madrid)</h1>
+        <p class="subtitle">Asistente con datos públicos (GH Pages • PyScript + Pyodide).</p>
+      </div>
+    </header>
+
+    <aside class="sidebar">
+      <h2>Filtros</h2>
+
+      <label for="epigrafe">Sector del negocio</label>
+      <select id="epigrafe" name="epigrafe"><option>Cargando…</option></select>
+
+      <label for="metros">m² del local</label>
+      <input id="metros" type="number" min="20" max="2000" value="100" />
+
+      <label for="presupuesto">Presupuesto mensual máx (€)</label>
+      <input id="presupuesto" type="number" min="500" max="50000" value="3500" />
+
+      <label for="perfil_renta">Clase social</label>
+      <select id="perfil_renta">
+        <option>Cualquiera</option>
+        <option>Barrios de Alta Renta (Premium)</option>
+        <option>Barrios de Renta Media/Baja (Volumen)</option>
+      </select>
+
+      <label for="target_edad">Segmento de edad</label>
+      <select id="target_edad">
+        <option>Todos</option>
+        <option>Estudiantes y Gen Z (15-24 años)</option>
+        <option>Profesionales Jóvenes (25-39 años)</option>
+        <option>Familias / Edad Madura (40-64 años)</option>
+        <option>Seniors y Jubilados (65+ años)</option>
+      </select>
+
+      <label for="genero_objetivo">Género predominante público</label>
+      <select id="genero_objetivo">
+        <option>Ambos</option>
+        <option>Hombres (Público Masculino)</option>
+        <option>Mujeres (Público Femenino)</option>
+      </select>
+
+      <label for="horario_objetivo">Estilo de ocio</label>
+      <select id="horario_objetivo">
+        <option>Indiferente</option>
+        <option>Ocio Nocturno / Tarde</option>
+        <option>Diurno / Estándar</option>
+      </select>
+
+      <label for="importancia_transito">Flujo peatonal (%)</label>
+      <input id="importancia_transito" type="range" min="0" max="100" value="50" />
+      <label for="tolerancia_supervivencia">Tolerancia supervivencia (%)</label>
+      <input id="tolerancia_supervivencia" type="range" min="0" max="100" value="50" />
+
+      <button id="btn-run" type="button" class="primary">Ejecutar análisis</button>
+
+      <p id="status-msg" class="status">Iniciando… (primera descarga puede tardar ~60 s)</p>
+      <p id="err-msg" class="error"></p>
+    </aside>
+
+    <main class="main">
+      <section class="panel split-wrap">
+        <div class="panel-col" id="results-cards"><p>Bienvenida. Ejecutar carga datos.</p></div>
+        <div class="panel-col map-wrap">
+          <h3>Densidad comercial por sector seleccionado</h3>
+          <p id="map-caption" class="cap muted"></p>
+          <div id="map"></div>
+        </div>
+      </section>
+    </main>
+
+    <script type="py" src="./main.py" config="./pyscript.json"></script>
+  </body>
+</html>
