@@ -15,7 +15,7 @@ El proyecto tiene dos interfaces:
   - tránsito
   - atractivo urbano (turismo, VUT, población, peatones)
 - Muestra:
-  - Mapa 1: locales candidatos (marcadores 🔍 + ficha de detalle)
+  - Mapa 1: locales candidatos (marcadores + ficha de detalle)
   - Mapa 2: densidad real del sector en Madrid (heatmap)
 - Incluye m² sintéticos por local (`metros_local_sintetico`) para estimar alquiler mensual orientativo hasta integrar una fuente inmobiliaria directa.
 
